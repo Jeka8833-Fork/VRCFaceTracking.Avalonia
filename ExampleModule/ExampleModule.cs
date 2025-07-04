@@ -1,6 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using VRCFaceTracking.Core.SDK.v2;
-using VRCFaceTracking.Core.SDK.v2.facade;
+using VRCFaceTracking.Core.SDK.v2.Facade;
 
 namespace ExampleModule;
 
