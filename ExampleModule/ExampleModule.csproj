@@ -10,4 +10,19 @@
       <ProjectReference Include="..\src\VRCFaceTracking\VRCFaceTracking.Core\VRCFaceTracking.Core.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <EmbeddedResource Update="Resources\MyModuleStrings.resx">
+        <Generator>ResXFileCodeGenerator</Generator>
+        <LastGenOutput>MyModuleStrings.Designer.cs</LastGenOutput>
+      </EmbeddedResource>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Update="Resources\MyModuleStrings.Designer.cs">
+        <DesignTime>True</DesignTime>
+        <AutoGen>True</AutoGen>
+        <DependentUpon>MyModuleStrings.resx</DependentUpon>
+      </Compile>
+    </ItemGroup>
+
 </Project>

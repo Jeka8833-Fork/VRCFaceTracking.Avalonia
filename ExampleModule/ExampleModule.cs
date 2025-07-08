@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using VRCFaceTracking.Core.SDK.v2;
 using VRCFaceTracking.Core.SDK.v2.Facade;
+using ExampleModule.Resources;
 
 namespace ExampleModule;
 
@@ -12,17 +13,99 @@ public class ExampleModule : VrcftModuleV2
     {
         _logger = Module.GetLoggerFactory().CreateLogger<ExampleModule>();
 
-        Module.GetUi().SetName("Example Module");
-        Module.GetUi().SetDescription("This is an example module.\nIt waits starting.");
-        Module.GetUi().SetAllowStart(true);
-        Module.GetUi().SetIcons("Assets.example.png");
+        Module.GetUi().SetTitle(MyModuleStrings.WelcomeMessage);
+        Module.GetUi().SetStatus("This is an example module.\nIt waits starting.");
+        Module.GetUi().SetIcons("ExampleModule.Assets.logo.png");
+
+        Module.GetModuleManager().SubscribeToModuleListChanged(moduleList =>
+        {
+            bool isStartAllowed = true;
+            foreach (VrcftModuleV2 vrcftModuleV2 in moduleList)
+            {
+                if (vrcftModuleV2.GetModuleId ==
+                    Guid.Parse("815d2d1d-4d1d-4d1d-815d-2d1d4d1d815d") && // It's better to cache uuid
+                    vrcftModuleV2.Module.GetModuleManager().IsStarted())
+                {
+                    Module.GetUi()
+                        .SetStatus($"Please disable {vrcftModuleV2.Module.GetUi().GetTitle()} module first.");
+                    isStartAllowed = false;
+                    break;
+                }
+            }
+
+            Module.GetModuleManager().SetAllowStart(isStartAllowed);
+        });
 
         // You can connect libs or other things here
     }
 
+    public override Guid GetModuleId { get; } = Guid.Parse("815d2d1d-4d1d-4d1d-815d-2d1d4d1d815d");
+
     public override void StartModule(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        IModuleParameterManager parameterManager = Module.GetParameterManager();
+        parameterManager.SetParameterTimeout(TimeSpan.FromSeconds(1));
+
+        parameterManager.Subscribe(PipelineStage.AfterModule, dict =>
+        {
+            float left = (float)dict.GetValueOrDefault(ARKitParameters.EyeLookDownLeft, 0f);
+            float right = (float)dict.GetValueOrDefault(ARKitParameters.EyeLookDownRight, 0f);
+
+            //parameterManager.SetValue();
+        }, ARKitParameters.EyeLookDownLeft, ARKitParameters.EyeLookDownRight);
+
+        try
+        {
+            Module.GetUi().SetStatus("Trying to find connection...\nLine 1\nLine 2\nLine 3");
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    // This is an example of a long-running task, you can do udp wait for example
+                    Thread.Sleep(5000); // It's preferable to use cancellationToken.WaitHandle.WaitOne() if you need to wait to avoid receiving ThreadInterruptedException unnecessarily.
+
+
+                    int secondsCounter = 0;
+                    while (!cancellationToken.IsCancellationRequested)
+                    {
+                        Module.GetUi().SetStatus("Module is running.\nSeconds: " + secondsCounter);
+
+                        cancellationToken.WaitHandle.WaitOne(1000);
+                        secondsCounter++;
+
+                        parameterManager.SetValue(ARKitParameters.EyeLookDownLeft, (float)Math.Sin(secondsCounter));
+                        parameterManager.Flush();
+                    }
+                }
+                catch (ThreadInterruptedException)
+                {
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    _logger.LogWarning(e, "Error in second loop");
+
+                    cancellationToken.WaitHandle.WaitOne(10);
+                }
+            }
+        }
+        catch (ThreadInterruptedException)
+        {
+            Module.GetUi().SetStatus("Module disabled with interrupt.");
+
+            throw;
+        }
+        catch (Exception e)
+        {
+            Module.GetUi().SetStatus("Module crashed.");
+
+            _logger.LogWarning(e, "Error in first loop");
+
+            throw;
+        }
+
+        Module.GetUi().SetStatus("Module disabled without interrupt.");
     }
 
     public override void Shutdown()
