@@ -2,6 +2,8 @@
 using VRCFaceTracking.Core.SDK.v2;
 using VRCFaceTracking.Core.SDK.v2.Facade;
 using ExampleModule.Resources;
+using VRCFaceTracking.Core.SDK.v2.Core.Pipeline;
+using VRCFaceTracking.Core.SDK.v2.Util;
 
 namespace ExampleModule;
 
@@ -22,7 +24,7 @@ public class ExampleModule : VrcftModuleV2
             bool isStartAllowed = true;
             foreach (VrcftModuleV2 vrcftModuleV2 in moduleList)
             {
-                if (vrcftModuleV2.GetModuleId ==
+                if (vrcftModuleV2.GetCachedModuleId() ==
                     Guid.Parse("815d2d1d-4d1d-4d1d-815d-2d1d4d1d815d") && // It's better to cache uuid
                     vrcftModuleV2.Module.GetModuleManager().IsStarted())
                 {
@@ -39,20 +41,46 @@ public class ExampleModule : VrcftModuleV2
         // You can connect libs or other things here
     }
 
-    public override Guid GetModuleId { get; } = Guid.Parse("815d2d1d-4d1d-4d1d-815d-2d1d4d1d815d");
+    protected override Guid GetModuleId() => Guid.Parse("815d2d1d-4d1d-4d1d-815d-2d1d4d1d815d");
 
     public override void StartModule(CancellationToken cancellationToken)
     {
         IModuleParameterManager parameterManager = Module.GetParameterManager();
         parameterManager.SetParameterTimeout(TimeSpan.FromSeconds(1));
 
-        parameterManager.Subscribe(PipelineStage.AfterModule, dict =>
-        {
-            float left = (float)dict.GetValueOrDefault(ARKitParameters.EyeLookDownLeft, 0f);
-            float right = (float)dict.GetValueOrDefault(ARKitParameters.EyeLookDownRight, 0f);
+        IPipelineNode listener = new CachedNodeListener(PipelineStage.AfterModule,
+            (header, parameters, cache) =>
+            {
+                float? left =
+                    (parameters.TryGetValue(ARKitParameters.EyeLookDownLeft, out object? leftValue)
+                        ? leftValue
+                        : cache.TryGetValue(ARKitParameters.EyeLookDownLeft, out object? leftValueCached)
+                            ? leftValueCached
+                            : null) as float?;
+                float? right =
+                    (parameters.TryGetValue(ARKitParameters.EyeLookDownRight, out object? rightValue)
+                        ? rightValue
+                        : cache.TryGetValue(ARKitParameters.EyeLookDownRight, out object? rightValueCached)
+                            ? rightValueCached
+                            : null) as float?;
 
-            //parameterManager.SetValue();
-        }, ARKitParameters.EyeLookDownLeft, ARKitParameters.EyeLookDownRight);
+                if (left.HasValue)
+                {
+                    parameters[ARKitParameters.EyeLookDownLeft] = left.Value * 2f;
+                }
+
+                if (right.HasValue)
+                {
+                    parameters[ARKitParameters.EyeLookDownRight] = right.Value * 2f;
+                }
+
+                return header.Modify()
+                    .WithExpireTime(WarpedMutableTime.GetCurrentTime())
+                    .Build();
+            },
+            ARKitParameters.EyeLookDownLeft, ARKitParameters.EyeLookDownRight);
+
+        parameterManager.RegisterPipelineNode(listener);
 
         try
         {
@@ -63,7 +91,8 @@ public class ExampleModule : VrcftModuleV2
                 try
                 {
                     // This is an example of a long-running task, you can do udp wait for example
-                    Thread.Sleep(5000); // It's preferable to use cancellationToken.WaitHandle.WaitOne() if you need to wait to avoid receiving ThreadInterruptedException unnecessarily.
+                    Thread.Sleep(
+                        5000); // It's preferable to use cancellationToken.WaitHandle.WaitOne() if you need to wait to avoid receiving ThreadInterruptedException unnecessarily.
 
 
                     int secondsCounter = 0;
