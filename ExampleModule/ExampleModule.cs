@@ -3,6 +3,7 @@ using VRCFaceTracking.Core.SDK.v2;
 using VRCFaceTracking.Core.SDK.v2.Facade;
 using ExampleModule.Resources;
 using VRCFaceTracking.Core.SDK.v2.Core.Pipeline;
+using VRCFaceTracking.Core.SDK.v2.Core.Pipeline.Nodes;
 using VRCFaceTracking.Core.SDK.v2.Util;
 
 namespace ExampleModule;
@@ -19,24 +20,28 @@ public class ExampleModule : VrcftModuleV2
         Module.GetUi().SetStatus("This is an example module.\nIt waits starting.");
         Module.GetUi().SetIcons("ExampleModule.Assets.logo.png");
 
-        Module.GetModuleManager().SubscribeToModuleListChanged(moduleList =>
+        Module.GetModuleManager().SubscribeToModuleListChange(moduleList =>
         {
-            bool isStartAllowed = true;
-            foreach (VrcftModuleV2 vrcftModuleV2 in moduleList)
+            VrcftModuleV2? conflictingModule = moduleList.GetValueOrDefault(
+                Guid.Parse("815d2d1d-4d1d-4d1d-815d-2d1d4d1d815d")); // It's better to cache uuid
+
+            if (conflictingModule != null && conflictingModule.Module.GetModuleManager().IsStarted())
             {
-                if (vrcftModuleV2.GetCachedModuleId() ==
-                    Guid.Parse("815d2d1d-4d1d-4d1d-815d-2d1d4d1d815d") && // It's better to cache uuid
-                    vrcftModuleV2.Module.GetModuleManager().IsStarted())
-                {
-                    Module.GetUi()
-                        .SetStatus($"Please disable {vrcftModuleV2.Module.GetUi().GetTitle()} module first.");
-                    isStartAllowed = false;
-                    break;
-                }
+                Module.GetUi()
+                    .SetStatus($"Please disable {conflictingModule.Module.GetUi().GetTitle()} module first.");
+
+                Module.GetModuleManager().SetAllowStart(false);
+                return;
             }
 
-            Module.GetModuleManager().SetAllowStart(isStartAllowed);
+            Module.GetModuleManager().SetAllowStart(true);
         });
+
+        IModuleParameterManager parameterManager = Module.GetParameterManager();
+
+        parameterManager.SetParameterTimeout(MutableTime.FromSeconds(1));
+
+        RegisterCustomPipelines(parameterManager);
 
         // You can connect libs or other things here
     }
@@ -46,41 +51,6 @@ public class ExampleModule : VrcftModuleV2
     public override void StartModule(CancellationToken cancellationToken)
     {
         IModuleParameterManager parameterManager = Module.GetParameterManager();
-        parameterManager.SetParameterTimeout(TimeSpan.FromSeconds(1));
-
-        IPipelineNode listener = new CachedNodeListener(PipelineStage.AfterModule,
-            (header, parameters, cache) =>
-            {
-                float? left =
-                    (parameters.TryGetValue(ARKitParameters.EyeLookDownLeft, out object? leftValue)
-                        ? leftValue
-                        : cache.TryGetValue(ARKitParameters.EyeLookDownLeft, out object? leftValueCached)
-                            ? leftValueCached
-                            : null) as float?;
-                float? right =
-                    (parameters.TryGetValue(ARKitParameters.EyeLookDownRight, out object? rightValue)
-                        ? rightValue
-                        : cache.TryGetValue(ARKitParameters.EyeLookDownRight, out object? rightValueCached)
-                            ? rightValueCached
-                            : null) as float?;
-
-                if (left.HasValue)
-                {
-                    parameters[ARKitParameters.EyeLookDownLeft] = left.Value * 2f;
-                }
-
-                if (right.HasValue)
-                {
-                    parameters[ARKitParameters.EyeLookDownRight] = right.Value * 2f;
-                }
-
-                return header.Modify()
-                    .WithExpireTime(WarpedMutableTime.GetCurrentTime())
-                    .Build();
-            },
-            ARKitParameters.EyeLookDownLeft, ARKitParameters.EyeLookDownRight);
-
-        parameterManager.RegisterPipelineNode(listener);
 
         try
         {
@@ -104,7 +74,7 @@ public class ExampleModule : VrcftModuleV2
                         secondsCounter++;
 
                         parameterManager.SetValue(ARKitParameters.EyeLookDownLeft, (float)Math.Sin(secondsCounter));
-                        parameterManager.Flush();
+                        parameterManager.Flush(MutableTime.FromSeconds(secondsCounter));
                     }
                 }
                 catch (ThreadInterruptedException)
@@ -140,5 +110,38 @@ public class ExampleModule : VrcftModuleV2
     public override void Shutdown()
     {
         _logger.LogInformation("We closed all threads, sockets, etc. VRCFT is shutting down.");
+    }
+
+    private static void RegisterCustomPipelines(IModuleParameterManager pipelineManager)
+    {
+        IPipelineNode listener = new CachedNodeListener(PipelinePriorityStage.ModuleStage,
+            PipelinePriorityStage.NormalPriority, (header, parameters, cache) =>
+            {
+                float? left =
+                    (parameters.TryGetValue(ARKitParameters.EyeLookDownLeft, out object? leftValue)
+                        ? leftValue
+                        : cache.TryGetValue(ARKitParameters.EyeLookDownLeft, out object? leftValueCached)
+                            ? leftValueCached
+                            : null) as float?;
+                float? right =
+                    (parameters.TryGetValue(ARKitParameters.EyeLookDownRight, out object? rightValue)
+                        ? rightValue
+                        : cache.TryGetValue(ARKitParameters.EyeLookDownRight, out object? rightValueCached)
+                            ? rightValueCached
+                            : null) as float?;
+
+                if (left.HasValue && right.HasValue)
+                {
+                    parameters[ARKitParameters.EyeLookDownLeft] = (left.Value + right.Value) * .5f;
+                    parameters[ARKitParameters.EyeLookDownRight] = (left.Value + right.Value) * .5f;
+                }
+
+                return header.Modify()
+                    .SetExpireTime(MutableTime.GetCurrentTime() + MutableTime.FromSeconds(10))
+                    .Build();
+            },
+            ARKitParameters.EyeLookDownLeft, ARKitParameters.EyeLookDownRight);
+
+        pipelineManager.RegisterPipelineNode(listener); // Automatically unregisters on shutdown
     }
 }
